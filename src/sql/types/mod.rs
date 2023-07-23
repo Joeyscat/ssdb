@@ -1,12 +1,12 @@
 mod expression;
 pub use expression::Expression;
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 
 use serde_derive::{Deserialize, Serialize};
 use std::{borrow::Cow, cmp::Ordering, hash::Hash};
 
-/// A datatype
+/// A data type
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub enum DataType {
     Boolean,
@@ -41,7 +41,7 @@ impl std::cmp::Eq for Value {}
 #[allow(clippy::derive_hash_xor_eq)]
 impl Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.datatype().hash(state);
+        self.data_type().hash(state);
         match self {
             Self::Null => self.hash(state),
             Self::Boolean(v) => v.hash(state),
@@ -66,7 +66,7 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 
 impl Value {
     /// Returns the value's data type, or None if it is null
-    pub fn datatype(&self) -> Option<DataType> {
+    pub fn data_type(&self) -> Option<DataType> {
         match self {
             Self::Null => None,
             Self::Boolean(_) => Some(DataType::Boolean),

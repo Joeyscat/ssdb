@@ -1,4 +1,10 @@
 use crate::error::{Error, Result};
+use crate::sql;
+use crate::sql::engine::{Engine as _, Mode};
+use crate::sql::execution::ResultSet;
+use crate::sql::schema::{Catalog as _, Table};
+use crate::sql::types::Row;
+use crate::storage::{kv, log};
 
 use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
