@@ -20,10 +20,10 @@ pub trait Store: Display + Send + Sync {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
     /// Set a value for a key. Overwrites any existing value.
-    fn set(&self, key: &[u8], value: Vec<u8>) -> Result<()>;
+    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
 
     /// Delete a key, or do nothing if it doesn't exist.
-    fn delete(&self, key: &[u8]) -> Result<()>;
+    fn delete(&mut self, key: &[u8]) -> Result<()>;
 
     /// Iterate over an ordered range of key-value pairs.
     fn scan(&self, range: Range) -> Scan;
@@ -59,6 +59,7 @@ impl Range {
     }
 
     /// Check if a value is within the range
+    #[allow(dead_code)]
     fn contains(&self, v: &[u8]) -> bool {
         (match &self.start {
             Bound::Included(start) => &**start <= v,
@@ -107,7 +108,7 @@ trait TestSuite<S: Store> {
     }
 
     fn test_get() -> Result<()> {
-        let store = Self::setup()?;
+        let mut store = Self::setup()?;
         assert_eq!(store.get(b"foo")?, None);
         store.set(b"foo", b"bar".to_vec())?;
         assert_eq!(store.get(b"foo")?, Some(b"bar".to_vec()));
@@ -116,7 +117,7 @@ trait TestSuite<S: Store> {
     }
 
     fn test_set() -> Result<()> {
-        let store = Self::setup()?;
+        let mut store = Self::setup()?;
         store.set(b"foo", b"bar".to_vec())?;
         assert_eq!(store.get(b"foo")?, Some(b"bar".to_vec()));
         store.set(b"foo", b"baz".to_vec())?;
@@ -125,7 +126,7 @@ trait TestSuite<S: Store> {
     }
 
     fn test_delete() -> Result<()> {
-        let store = Self::setup()?;
+        let mut store = Self::setup()?;
         store.set(b"foo", b"bar".to_vec())?;
         assert_eq!(store.get(b"foo")?, Some(b"bar".to_vec()));
         store.delete(b"foo")?;
@@ -135,7 +136,7 @@ trait TestSuite<S: Store> {
     }
 
     fn test_scan() -> Result<()> {
-        let store = Self::setup()?;
+        let mut store = Self::setup()?;
         store.set(b"foo", b"bar".to_vec())?;
         store.set(b"foo1", b"bar1".to_vec())?;
         store.set(b"foo2", b"bar2".to_vec())?;
@@ -200,6 +201,7 @@ trait TestSuite<S: Store> {
                 .scan(Range::from(b"foo2".to_vec()..))
                 .collect::<Result<Vec<_>>>()?,
             vec![
+                (b"foo2".to_vec(), b"bar2".to_vec()),
                 (b"foo3".to_vec(), b"bar3".to_vec()),
                 (b"foo4".to_vec(), b"bar4".to_vec()),
             ]

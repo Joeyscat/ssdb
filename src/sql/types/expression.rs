@@ -83,7 +83,7 @@ impl Expression {
                 (Float(lhs), Integer(rhs)) => Boolean(lhs == (rhs as f64)),
                 (String(lhs), String(rhs)) => Boolean(lhs == rhs),
                 (Null, _) | (_, Null) => Null,
-                (lhs, rhs) => Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
+                (lhs, rhs) => return Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
             },
             Self::GreaterThan(lhs, rhs) => match (lhs.evaluate(row)?, rhs.evaluate(row)?) {
                 #[allow(clippy::bool_comparison)]
@@ -94,7 +94,7 @@ impl Expression {
                 (Float(lhs), Integer(rhs)) => Boolean(lhs > (rhs as f64)),
                 (String(lhs), String(rhs)) => Boolean(lhs > rhs),
                 (Null, _) | (_, Null) => Null,
-                (lhs, rhs) => Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
+                (lhs, rhs) => return Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
             },
             Self::IsNull(expr) => match expr.evaluate(row)? {
                 Null => Boolean(true),
@@ -109,7 +109,7 @@ impl Expression {
                 (Float(lhs), Integer(rhs)) => Boolean(lhs < (rhs as f64)),
                 (String(lhs), String(rhs)) => Boolean(lhs < rhs),
                 (Null, _) | (_, Null) => Null,
-                (lhs, rhs) => Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
+                (lhs, rhs) => return Err(Error::Value(format!("Compare {} and {}", lhs, rhs))),
             },
 
             // Math operations
@@ -186,15 +186,7 @@ impl Expression {
                 }
             },
             Self::Factorial(expr) => match expr.evaluate(row)? {
-                Integer(n) if n >= 0 => {
-                    let mut result = 1;
-                    for i in 1..=n {
-                        result = result
-                            .checked_mul(i)
-                            .ok_or_else(|| Error::Value("Integer overflow".into()))?;
-                    }
-                    Integer(result)
-                }
+                Integer(n) if n >= 0 => Integer((1..=n).fold(1, |a, b| a * b as i64)),
                 Integer(_) => return Err(Error::Value("Factorial of negative number".into())),
                 Null => Null,
                 expr => return Err(Error::Value(format!("Factorial {}", expr))),
@@ -400,9 +392,10 @@ impl Expression {
             .transform(
                 &|e| match e {
                     Or(lhs, rhs) => match (*lhs, *rhs) {
-                        (And(ll, lr), r) => {
-                            Ok(And(Or(ll, r.clone().into()), Or(lr, r.into()).into()))
-                        }
+                        (And(ll, lr), r) => Ok(And(
+                            Or(ll, r.clone().into()).into(),
+                            Or(lr, r.into()).into(),
+                        )),
                         (l, And(rl, rr)) => Ok(And(
                             Or(l.clone().into(), rl).into(),
                             Or(l.into(), rr).into(),
@@ -441,9 +434,10 @@ impl Expression {
             .transform(
                 &|e| match e {
                     And(lhs, rhs) => match (*lhs, *rhs) {
-                        (Or(ll, lr), r) => {
-                            Ok(Or(And(ll, r.clone().into()), And(lr, r.into()).into()))
-                        }
+                        (Or(ll, lr), r) => Ok(Or(
+                            And(ll, r.clone().into()).into(),
+                            And(lr, r.into()).into(),
+                        )),
                         (l, Or(rl, rr)) => Ok(Or(
                             And(l.clone().into(), rl).into(),
                             And(l.into(), rr).into(),
@@ -556,9 +550,9 @@ impl std::fmt::Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Constant(value) => value.to_string(),
-            Self::Field(index, _) => format!("#{}", index),
             Self::Field(_, Some((None, name))) => name.to_string(),
             Self::Field(_, Some((Some(table), name))) => format!("{}.{}", table, name),
+            Self::Field(index, _) => format!("#{}", index),
 
             Self::And(lhs, rhs) => format!("{} AND {}", lhs, rhs),
             Self::Not(expr) => format!("NOT {}", expr),

@@ -12,14 +12,8 @@ pub struct Test {
     kv: Arc<RwLock<StdMemory>>,
 }
 
-#[test]
-fn tests() -> Result<()> {
-    use super::TestSuite;
-    Test::test()
-}
-
 impl Test {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             kv: Arc::new(RwLock::new(StdMemory::new())),
         }
@@ -37,11 +31,11 @@ impl Store for Test {
         self.kv.read()?.get(key)
     }
 
-    fn set(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
+    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {
         self.kv.write()?.set(key, value)
     }
 
-    fn delete(&self, key: &[u8]) -> Result<()> {
+    fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.kv.write()?.delete(key)
     }
 
@@ -59,4 +53,17 @@ impl Store for Test {
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
+}
+
+#[cfg(test)]
+impl super::TestSuite<Test> for Test {
+    fn setup() -> Result<Self> {
+        Ok(Self::new())
+    }
+}
+
+#[test]
+fn tests() -> Result<()> {
+    use super::TestSuite;
+    Test::test()
 }

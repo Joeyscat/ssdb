@@ -1,27 +1,27 @@
+//! SQL引擎, 提供了基本的CRUD存储操作。
 mod kv;
 pub use kv::KV;
 use sqlparser::ast::Statement;
-use sqlparser::dialect::{GenericDialect};
+use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use super::execution::ResultSet;
-// use super::parser::{ast, Parser};
-use super::plan::Planner;
+use super::plan::Plan;
 use super::schema::Catalog;
 use super::types::{Expression, Row, Value};
 use crate::error::{Error, Result};
 
 use std::collections::HashSet;
 
-/// The SQL engine interface.
+/// SQL引擎接口
 pub trait Engine: Clone {
-    /// The transaction type
+    /// 事务类型
     type Transaction: Transaction;
 
-    /// Begin a new transaction in the given mode
+    /// 开始一个新的事务
     fn begin(&self, mode: Mode) -> Result<Self::Transaction>;
 
-    /// Begin a session for executing individual statements
+    /// 开始一个会话，用于执行单个语句
     fn session(&self) -> Result<Session<Self>> {
         Ok(Session {
             engine: self.clone(),
@@ -29,56 +29,56 @@ pub trait Engine: Clone {
         })
     }
 
-    /// Resume an active transaction with the given ID
+    /// 用给定的ID恢复一个活动的事务
     fn resume(&self, id: u64) -> Result<Self::Transaction>;
 }
 
-/// An SQL Transaction
+/// SQL事务
 pub trait Transaction: Catalog {
-    /// The transaction ID
+    /// 事务ID
     fn id(&self) -> u64;
-    /// The transaction mode
+    /// 事务模式
     fn mode(&self) -> Mode;
-    /// Commit the transaction
+    /// 提交事务
     fn commit(self) -> Result<()>;
-    /// Rollback the transaction
+    /// 回滚事务
     fn rollback(self) -> Result<()>;
 
-    /// Create a new table row
+    /// 创建新行
     fn create_row(&mut self, table: &str, row: Row) -> Result<()>;
-    /// Delete a table row
+    /// 删除行
     fn delete_row(&mut self, table: &str, id: &Value) -> Result<()>;
-    /// Read a table row, if it exists
+    /// 读取行
     fn read_row(&self, table: &str, id: &Value) -> Result<Option<Row>>;
-    /// Update a table row
+    /// 更新行
     fn update_row(&mut self, table: &str, id: &Value, row: Row) -> Result<()>;
-    /// Read an index entry, if it exists
-    fn read_index(&self, table: &str, column: &str, id: &Value) -> Result<HashSet<Value>>;
-    /// Scan a table
+    /// 读取索引
+    fn read_index(&self, table: &str, column: &str, value: &Value) -> Result<HashSet<Value>>;
+    /// 扫描表
     fn scan(&self, table: &str, filter: Option<Expression>) -> Result<Scan>;
-    /// Scan a column's index entries
+    /// 扫描索引
     fn scan_index(&self, table: &str, column: &str) -> Result<IndexScan>;
 }
 
-/// An SQL session, which handles transaction management, and simplified query execution
+/// SQL会话，处理事务管理和简化的查询执行
 pub struct Session<E: Engine> {
-    /// The underlying engine
+    /// 底层引擎
     engine: E,
-    /// The active transaction
+    /// 活动事务
     txn: Option<E::Transaction>,
 }
 
 impl<E: Engine + 'static> Session<E> {
-    /// Execute a single SQL statement, managing the transaction state for the session
+    /// 执行单个SQL语句，管理会话的事务状态
     pub fn execute(&mut self, query: &str) -> Result<ResultSet> {
         let statement = Parser::new(&GenericDialect {})
             .try_with_sql(query)?
             .parse_statement()?;
 
         match statement {
-            Statement::Query(query) => {
+            statement @ Statement::Query(..) => {
                 let mut txn = self.engine.begin(Mode::ReadOnly)?;
-                let result = Planner::build(statement, &mut txn)?
+                let result = Plan::build(statement.clone(), &mut txn)?
                     .optimize(&mut txn)?
                     .execute(&mut txn);
                 txn.rollback()?;
@@ -90,13 +90,31 @@ impl<E: Engine + 'static> Session<E> {
             ))),
         }
     }
+
+    pub fn with_txn<R, F>(&mut self, mode: Mode, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut E::Transaction) -> Result<R>,
+    {
+        if let Some(ref mut txn) = self.txn {
+            if !txn.mode().satisfies(&mode) {
+                return Err(Error::Value(
+                    "The operation cannot be performed in the current transaction mode".into(),
+                ));
+            }
+            return f(txn);
+        }
+        let mut txn = self.engine.begin(mode)?;
+        let result = f(&mut txn);
+        txn.rollback()?;
+        result
+    }
 }
 
-/// The transaction mode
+/// 事务模式
 pub type Mode = crate::storage::kv::mvcc::Mode;
 
-/// A row scan iterator
+/// 行扫描迭代器
 pub type Scan = Box<dyn DoubleEndedIterator<Item = Result<Row>> + Send>;
 
-/// An index scan iterator
+/// 索引扫描迭代器
 pub type IndexScan = Box<dyn DoubleEndedIterator<Item = Result<(Value, HashSet<Value>)>> + Send>;

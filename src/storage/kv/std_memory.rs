@@ -28,18 +28,19 @@ impl Store for StdMemory {
         Ok(self.data.get(key).cloned())
     }
 
-    fn set(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
+    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {
         self.data.insert(key.to_vec(), value);
         Ok(())
     }
 
-    fn delete(&self, key: &[u8]) -> Result<()> {
+    fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.data.remove(key);
         Ok(())
     }
 
     fn scan(&self, range: Range) -> Scan {
-        // 
+        // 由于范围迭代器返回借用的项, 因此需要在迭代期间对其进行读取锁定. 这太粗糙了, 因此我们在这里缓冲整个迭代.
+        // 相反, 应该使用带有arc-mutex的迭代器, 它能够通过再次抓取锁来恢复迭代.
         Box::new(
             self.data
                 .range(range)

@@ -4,21 +4,29 @@ use crate::sql::engine::{Engine as _, Mode};
 use crate::sql::execution::ResultSet;
 use crate::sql::schema::{Catalog as _, Table};
 use crate::sql::types::Row;
-use crate::storage::{kv, log};
+use crate::storage::kv;
 
+use futures::sink::SinkExt as _;
 use log::{error, info};
+use serde_derive::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_serde::Framed;
-use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
-use tokio_util::codec::LengthDelimitedCodec;
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_stream::StreamExt as _;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 pub struct Server {
+    engine: sql::engine::KV,
     listener: Option<TcpListener>,
 }
 
 impl Server {
     pub async fn new(store: Box<dyn kv::Store>) -> Result<Self> {
-        Ok(Self { listener: None })
+        let mvcc = kv::MVCC::new(store);
+        let engine = sql::engine::KV::new(mvcc);
+        Ok(Self {
+            engine,
+            listener: None,
+        })
     }
 
     pub async fn listen(mut self, addr: &str) -> Result<Self> {
@@ -32,12 +40,12 @@ impl Server {
             .listener
             .ok_or_else(|| Error::Internal("Must listen before serving".into()))?;
 
-        Self::serve_sql(listener).await?;
+        Self::serve_sql(listener, self.engine).await?;
 
         Ok(())
     }
 
-    async fn serve_sql(listener: TcpListener, engine: sql::engine::DefaultEngine) -> Result<()> {
+    async fn serve_sql(listener: TcpListener, engine: sql::engine::KV) -> Result<()> {
         let mut listener = TcpListenerStream::new(listener);
         while let Some(socket) = listener.try_next().await? {
             let peer = socket.peer_addr()?;
@@ -48,38 +56,43 @@ impl Server {
                     Ok(()) => info!("Client {} disconnected", peer),
                     Err(err) => error!("Client {} error: {}", peer, err),
                 }
-            })
+            });
         }
         Ok(())
     }
 }
 
+/// 客户端请求
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
     Execute(String),
     GetTable(String),
     ListTables,
-    Status,
+    // Status,
 }
 
+/// 服务端响应
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Execute(ResultSet),
     Row(Option<Row>),
     GetTable(Table),
     ListTables(Vec<String>),
-    Status(sql::engine::Status),
+    // Status(sql::engine::Status),
 }
 
+/// 与 SQL 会话耦合的客户端会话。
 pub struct Session {
-    engine: sql::engine::DefaultEngine,
-    sql: sql::engine::Session<sql::engine::DefaultEngine>,
+    _engine: sql::engine::KV,
+    sql: sql::engine::Session<sql::engine::KV>,
 }
 
 impl Session {
     /// Create a new client session.
-    fn new(engine: sql::engine::DefaultEngine) -> Result<Self> {
+    fn new(engine: sql::engine::KV) -> Result<Self> {
         Ok(Self {
             sql: engine.session()?,
-            engine,
+            _engine: engine,
         })
     }
 
@@ -133,10 +146,9 @@ impl Session {
             ),
             Request::ListTables => {
                 Response::ListTables(self.sql.with_txn(Mode::ReadOnly, |txn| {
-                    Ok(txn.scan_tables()?.map(|t| t.name).collect())
+                    Ok(txn.tables()?.map(|t| t.name).collect())
                 })?)
-            }
-            Request::Status => Response::Status(self.engine.status()?),
+            } // Request::Status => Response::Status(self.engine.status()?),
         })
     }
 }

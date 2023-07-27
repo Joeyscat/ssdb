@@ -3,7 +3,6 @@ use super::types::{DataType, Value};
 use crate::error::{Error, Result};
 
 use serde_derive::{Deserialize, Serialize};
-use sqlparser::keywords::Keyword;
 
 /// The Catalog stores schema information
 pub trait Catalog {
@@ -14,7 +13,7 @@ pub trait Catalog {
     /// Read a table, if it exists
     fn read_table(&self, table: &str) -> Result<Option<Table>>;
     /// Iterate over all tables
-    fn tables(&self) -> Result<Vec<Table>>;
+    fn tables(&self) -> Result<Tables>;
 
     /// Read a table, or error if it doesn't exist
     fn must_read_table(&self, table: &str) -> Result<Table> {
@@ -102,6 +101,8 @@ impl Table {
                 .position(|c| c.primary_key)
                 .ok_or_else(|| Error::Value(format!("Table '{}' has no primary key", self.name)))?,
         )
+        .cloned()
+        .ok_or_else(|| Error::Value(format!("Table '{}' has no primary key", self.name)))
     }
 
     /// Validate the table schema
@@ -170,6 +171,7 @@ impl std::fmt::Display for Table {
 }
 
 /// A table column schema
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     /// The column name
     pub name: String,
@@ -290,7 +292,7 @@ impl Column {
                 self.name
             ))),
             _ => Ok(()),
-        }
+        }?;
 
         // validate outgoing references
         if let Some(target) = &self.references {
@@ -359,7 +361,7 @@ fn format_ident(ident: &str) -> String {
         static ref RE_IDENT: regex::Regex = regex::Regex::new(r#"^\w[\w_]*$"#).unwrap();
     }
 
-    if RE_IDENT.is_match(ident) && Keyword::from(ident).is_none() {
+    if RE_IDENT.is_match(ident) {
         ident.to_string()
     } else {
         format!("\"{}\"", ident.replace("\"", "\"\""))
